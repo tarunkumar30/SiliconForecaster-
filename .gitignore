@@ -1,0 +1,12 @@
+# Python and virtualenv
+.venv/
+venv/
+env/
+__pycache__/
+*.pyc
+
+# Uploads and local files
+uploads/
+
+# OS files
+.DS_Store
