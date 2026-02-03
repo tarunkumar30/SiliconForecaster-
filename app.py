@@ -14,6 +14,13 @@ from flask import Flask, render_template, request, redirect, url_for, flash
 import pandas as pd
 import numpy as np
 import joblib
+import matplotlib.pyplot as plt
+import matplotlib
+import io
+import base64
+
+# Use Agg backend to prevent display issues in headless environments
+matplotlib.use('Agg')
 
 # Configuration
 APP_ROOT = os.path.dirname(os.path.abspath(__file__))
@@ -70,6 +77,60 @@ def prepare_features(df, scaler):
             raise ValueError("No numeric features found in the uploaded CSV.")
         X = df[features]
     return X, features
+
+
+def generate_charts(predictions):
+    """Generate bar and pie charts for pass/fail predictions.
+    
+    Returns base64 encoded strings for the charts.
+    """
+    # Count pass/fail predictions
+    pred_counts = pd.Series(predictions).value_counts().sort_index()
+    
+    # Map 0/1 to Pass/Fail labels
+    labels = ['Fail' if x == 0 else 'Pass' for x in pred_counts.index]
+    values = pred_counts.values
+    colors = ["#3f567c", '#51cf66']  # Red for Fail, Green for Pass
+    
+    # Create figure with subplots for bar and pie charts
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
+    fig.patch.set_facecolor('#1e1e1e')
+    
+    # Bar chart
+    ax1.bar(labels, values, color=colors, edgecolor='white', linewidth=2)
+    ax1.set_ylabel('Count', color='white', fontsize=12, fontweight='bold')
+    ax1.set_title('Pass/Fail Distribution (Bar Chart)', color='white', fontsize=14, fontweight='bold')
+    ax1.set_facecolor('#2d2d2d')
+    ax1.tick_params(axis='both', colors='white')
+    ax1.grid(axis='y', alpha=0.3, color='white')
+    
+    # Add value labels on bars
+    for i, v in enumerate(values):
+        ax1.text(i, v + 0.5, str(v), ha='center', color='white', fontweight='bold')
+    
+    # Pie chart
+    wedges, texts, autotexts = ax2.pie(values, labels=labels, colors=colors, autopct='%1.1f%%',
+                                        startangle=90, textprops={'color': 'white', 'fontsize': 11, 'fontweight': 'bold'},
+                                        wedgeprops={'edgecolor': 'white', 'linewidth': 2})
+    ax2.set_title('Pass/Fail Distribution (Pie Chart)', color='white', fontsize=14, fontweight='bold')
+    ax2.set_facecolor('#2d2d2d')
+    
+    # Style the percentage text
+    for autotext in autotexts:
+        autotext.set_color('black')
+        autotext.set_fontweight('bold')
+        autotext.set_fontsize(12)
+    
+    plt.tight_layout()
+    
+    # Convert to base64
+    buffer = io.BytesIO()
+    plt.savefig(buffer, format='png', facecolor='#1e1e1e', edgecolor='none', bbox_inches='tight', dpi=100)
+    buffer.seek(0)
+    image_base64 = base64.b64encode(buffer.read()).decode()
+    plt.close()
+    
+    return f"data:image/png;base64,{image_base64}"
 
 
 @app.route('/')
@@ -156,10 +217,13 @@ def predict():
         if proba_col is not None:
             results['prediction_probability'] = np.round(proba_col, 4)
 
+        # Generate charts for pass/fail distribution
+        chart_image = generate_charts(preds)
+
         # Convert to HTML table in template safely
         table_html = results.to_html(classes=['table', 'table-striped', 'table-bordered'], index=False, justify='center')
 
-        return render_template('results_alt.html', table_html=table_html, filename=filename)
+        return render_template('results_alt.html', table_html=table_html, filename=filename, chart_image=chart_image)
 
     else:
         flash('Allowed file types: csv')
