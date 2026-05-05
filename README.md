@@ -1,21 +1,22 @@
-# Flask ML prediction app
+# Flask ML Prediction App
 
-This repository provides a minimal Flask app that lets you upload a CSV file
-and get predictions from your pre-trained model and scaler saved with joblib.
+## Description
 
-Files added:
+This repository contains a minimal Flask application that allows users to upload a CSV file and receive predictions from a pretrained model and scaler saved with `joblib`.
 
-- `app.py` - main Flask application. Loads model and scaler (joblib) and exposes an upload form and prediction results.
-- `templates/index.html` - upload form
-- `templates/results.html` - results page that shows predictions in a table
-- `static/styles.css` - tiny stylesheet
-- `requirements.txt` - Python dependencies
-- `Procfile` - for Render / Heroku (uses gunicorn)
+## Included Files
+
+- `app.py` - Main Flask application. Loads the model and scaler (`joblib`) and provides an upload form and prediction results.
+- `templates/index.html` - Upload form.
+- `templates/results.html` - Results page displaying predictions in a table.
+- `static/styles.css` - Minimal stylesheet.
+- `requirements.txt` - Python dependencies.
+- `Procfile` - Deployment configuration for Render / Heroku using `gunicorn`.
 - `.gitignore`
 
-How to use (local development)
+## Local Development
 
-1. Create a virtual environment and install requirements (Windows PowerShell):
+1. Create a virtual environment and install the requirements (Windows PowerShell):
 
 ```powershell
 python -m venv venv
@@ -23,7 +24,7 @@ python -m venv venv
 pip install -r requirements.txt
 ```
 
-2. Place your saved model files in a `models/` folder at repo root:
+2. Place your saved model files in a `models/` folder at the repository root:
 
 ```
 models/best_model.pkl
@@ -36,23 +37,39 @@ models/scaler_model.pkl
 python app.py
 ```
 
-4. Open http://127.0.0.1:5000 in your browser and upload a CSV.
+4. Open `http://127.0.0.1:5000` in your browser and upload a CSV file.
 
-Deployment notes
+## Authentication
 
-- Render: connect your GitHub repo and it will detect `Procfile`. Set build command to `pip install -r requirements.txt` and it will run using `gunicorn app:app`.
-- GitHub: push your repo. If model files are large consider Git LFS or place them in cloud storage and update `app.py` to download at startup.
+This application requires user authentication. Upon accessing the app, you will be redirected to a login page. Use the following test credentials to log in:
 
-Troubleshooting
+- **Administrator**:
+  - Username: `Tarun`
+  - Password: `Tarun@2001`
 
-- If the scaler has `feature_names_in_` saved, the uploaded CSV must include those columns exactly.
-- If you see a FileNotFoundError for model/scaler, ensure the files exist at the paths described above.
+- **Users**:
+  - Username: `Mani`, Password: `Mani@2004`
+  - Username: `Chandu`, Password: `Chandu@2005`
+  - Username: `Soni`, Password: `Soni@2003`
 
-Alternate UI theme
+After logging in, you can upload CSV files for prediction.
 
-- This repo includes an alternate dark/minimal theme. Files:
-	- `templates/index_alt.html`
-	- `templates/results_alt.html`
-	- `static/styles_alt.css`
+## Deployment Notes
 
-To preview the alternate theme locally, temporarily change the template names in `app.py` render calls (e.g. render `index_alt.html` instead of `index.html`). This keeps the alternate look available without removing the default colorful theme.
+- Render: Connect your GitHub repository and it will detect the `Procfile`. Set the build command to `pip install -r requirements.txt`; the app will run using `gunicorn app:app`.
+- GitHub: Push your repository. If model files are large, consider using Git LFS or placing them in cloud storage and updating `app.py` to download them at startup.
+
+## Troubleshooting
+
+- If the scaler includes `feature_names_in_`, the uploaded CSV must contain those exact columns.
+- If you encounter a `FileNotFoundError` for the model or scaler, verify the files exist at the expected paths.
+
+## Alternate UI Theme
+
+This repository includes an alternate dark/minimal theme with the following files:
+
+- `templates/index_alt.html`
+- `templates/results_alt.html`
+- `static/styles_alt.css`
+
+To preview the alternate theme locally, temporarily change the template names in `app.py` render calls (for example, render `index_alt.html` instead of `index.html`). This preserves the alternate look without removing the default colorful theme.
