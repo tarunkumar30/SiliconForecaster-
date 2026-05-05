@@ -10,7 +10,7 @@ Comments throughout explain each step.
 """
 import os
 from werkzeug.utils import secure_filename
-from flask import Flask, render_template, request, redirect, url_for, flash
+from flask import Flask, render_template, request, redirect, url_for, session
 import pandas as pd
 import numpy as np
 import joblib
@@ -43,6 +43,17 @@ app.config['MAX_CONTENT_LENGTH'] = 16 * 1024 * 1024  # 16 MB upload limit
 
 def allowed_file(filename):
     return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+
+
+def flash_invalid_file_error(error=None):
+    """Store a generic popup message for invalid or malformed CSV uploads.
+
+    The actual exception is logged server-side for debugging, but users only
+    see a simple and friendly message.
+    """
+    if error is not None:
+        app.logger.exception('Invalid or malformed CSV upload')
+    set_popup_message('You have chosen the wrong file. Please select a valid file to proceed.')
 
 
 def find_and_load(path_list, friendly_name):
@@ -79,18 +90,55 @@ def prepare_features(df, scaler):
     return X, features
 
 
+def validate_and_predict(features_df, model, scaler):
+    """
+    Enhanced validation to handle extreme outliers and zeros.
+    Prevents infinity and overflow errors by clipping extreme values.
+    """
+    predictions = []
+    feat_names = scaler.feature_names_in_
+    X_to_predict = features_df[feat_names].values
+
+    for idx in range(len(X_to_predict)):
+        row = X_to_predict[idx]
+
+        # 1. Check for all-zero rows
+        if np.all(np.abs(row) < 1e-6):
+            predictions.append(1)  # Force FAIL
+            continue
+
+        try:
+            # 2. Transform the row
+            scaled_row = scaler.transform(row.reshape(1, -1))
+
+            # 3. CLIP extreme values to prevent float32 overflow in models
+            # This handles the 'infinity' error by capping values at reasonable limits
+            scaled_row = np.clip(scaled_row, -1e6, 1e6)
+
+            pred = model.predict(scaled_row)[0]
+            predictions.append(pred)
+        except Exception as e:
+            # If scaling or prediction still fails due to numerical issues
+            print(f"Error processing row {idx}: {e}")
+            predictions.append(1)  # Default to fail on error
+
+    return np.array(predictions)
+
+
 def generate_charts(predictions):
     """Generate bar and pie charts for pass/fail predictions.
     
     Returns base64 encoded strings for the charts.
     """
     # Count pass/fail predictions
-    pred_counts = pd.Series(predictions).value_counts().sort_index()
+    # Map -1 to 0 (Pass) and 1 to 1 (Fail) for consistency
+    predictions_binary = np.where(predictions == -1, 0, 1)
+    pred_counts = pd.Series(predictions_binary).value_counts().sort_index()
     
     # Map 0/1 to Pass/Fail labels
-    labels = ['Fail' if x == 0 else 'Pass' for x in pred_counts.index]
+    labels = ['Pass' if x == 0 else 'Fail' for x in pred_counts.index]
     values = pred_counts.values
-    colors = ["#3f567c", '#51cf66']  # Red for Fail, Green for Pass
+    colors = ["#4ade80", "#f87171"]  # Green for Pass, Red for Fail
     
     # Create figure with subplots for bar and pie charts
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(14, 5))
@@ -133,23 +181,62 @@ def generate_charts(predictions):
     return f"data:image/png;base64,{image_base64}"
 
 
+def set_popup_message(message):
+    """Store a one-time popup message in session for display on the next page."""
+    session['popup_message'] = message
+
+
 @app.route('/')
 def index():
     """Render the upload page."""
-    return render_template('index_alt.html')
+    # Require login: if no user in session, send to login page
+    if not session.get('user'):
+        return redirect(url_for('login'))
+    popup_message = session.pop('popup_message', None)
+    return render_template('index_alt.html', popup_message=popup_message)
 
+
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    """Simple login page. On success redirect to the Predict page (index)."""
+    if request.method == 'POST':
+        username = request.form.get('username', '')
+        password = request.form.get('password', '')
+
+        # Define credentials
+        admin_credentials = {'Tarun': 'Tarun@2001'}
+        employee_credentials = {
+            'Mani': 'Mani@2004',
+            'Chandu': 'Chandu@2005',
+            'Soni': 'Soni@2003'
+        }
+
+        if username in admin_credentials and password == admin_credentials[username]:
+            session['user'] = 'admin'
+            set_popup_message('You have logged in successfully')
+            return redirect(url_for('index'))
+        elif username in employee_credentials and password == employee_credentials[username]:
+            session['user'] = username
+            set_popup_message('Your login credentials will be sent to admin')
+            return redirect(url_for('index'))
+        else:
+            set_popup_message('Invalid username or password. Please contact admin for login credentials')
+            return redirect(url_for('login'))
+
+    popup_message = session.pop('popup_message', None)
+    return render_template('login.html', popup_message=popup_message)
 
 @app.route('/predict', methods=['POST'])
 def predict():
     """Handle CSV upload, run predictions, and render results."""
     # Check that the file part exists
     if 'file' not in request.files:
-        flash('No file part in request')
+        set_popup_message('You have chosen the wrong file. Please select a valid file to proceed.')
         return redirect(url_for('index'))
 
     file = request.files['file']
     if file.filename == '':
-        flash('No selected file')
+        set_popup_message('You have chosen the wrong file. Please select a valid file to proceed.')
         return redirect(url_for('index'))
 
     if file and allowed_file(file.filename):
@@ -162,58 +249,84 @@ def predict():
             # Read CSV into DataFrame (attempt to infer separators and encodings)
             df = pd.read_csv(upload_path)
         except Exception as e:
-            flash(f'Could not read CSV: {e}')
+            flash_invalid_file_error(e)
             return redirect(url_for('index'))
 
         # Load scaler and model (deferred until upload to allow app to start without models)
         try:
             scaler = find_and_load(SCALER_PATHS, 'scaler')
         except FileNotFoundError as e:
-            flash(str(e))
+            app.logger.exception('Model or scaler load failed')
+            set_popup_message('Server configuration error. Please contact support.')
             return redirect(url_for('index'))
 
         try:
             model = find_and_load(MODEL_PATHS, 'model')
         except FileNotFoundError as e:
-            flash(str(e))
+            app.logger.exception('Model or scaler load failed')
+            set_popup_message('Server configuration error. Please contact support.')
             return redirect(url_for('index'))
 
-        # Prepare features and run scaler/model
+        # Prepare features
         try:
             X_raw, feature_cols = prepare_features(df, scaler)
         except Exception as e:
-            flash(str(e))
+            flash_invalid_file_error(e)
             return redirect(url_for('index'))
 
+        # Use the enhanced validation function to make predictions
         try:
-            X_scaled = scaler.transform(X_raw)
+            preds = validate_and_predict(df, model, scaler)
         except Exception as e:
-            flash(f'Error while transforming features with scaler: {e}')
-            return redirect(url_for('index'))
-
-        try:
-            preds = model.predict(X_scaled)
-        except Exception as e:
-            flash(f'Error while running model.predict: {e}')
+            flash_invalid_file_error(e)
             return redirect(url_for('index'))
 
         # Optionally add probabilities for binary classifiers
         proba_col = None
         try:
             if hasattr(model, 'predict_proba'):
-                proba = model.predict_proba(X_scaled)
-                # If binary, keep probability for positive class
-                if proba.shape[1] == 2:
-                    proba_col = proba[:, 1]
-                else:
-                    # For multiclass, keep max probability
-                    proba_col = proba.max(axis=1)
+                # Process probabilities row by row with the same clipping strategy
+                probabilities = []
+                feat_names = scaler.feature_names_in_
+                X_to_predict = df[feat_names].values
+                
+                for idx in range(len(X_to_predict)):
+                    row = X_to_predict[idx]
+                    
+                    # Check for all-zero rows
+                    if np.all(np.abs(row) < 1e-6):
+                        probabilities.append(0.0)  # Low probability for fail cases
+                        continue
+                    
+                    try:
+                        # Transform and clip
+                        scaled_row = scaler.transform(row.reshape(1, -1))
+                        scaled_row = np.clip(scaled_row, -1e6, 1e6)
+                        
+                        proba = model.predict_proba(scaled_row)[0]
+                        # If binary, keep probability for positive class (index 1)
+                        if len(proba) == 2:
+                            probabilities.append(proba[1])
+                        else:
+                            # For multiclass, keep max probability
+                            probabilities.append(proba.max())
+                    except Exception:
+                        probabilities.append(0.0)
+                
+                proba_col = np.array(probabilities)
         except Exception:
             proba_col = None
 
         # Build results DataFrame for display
         results = df.copy()
+        
+        # Map predictions to Pass/Fail labels
+        # Assuming: -1 = Pass, 1 = Fail (based on your training code)
         results['prediction'] = preds
+        results['prediction_label'] = results['prediction'].apply(
+            lambda x: 'Pass' if x == -1 else 'Fail'
+        )
+        
         if proba_col is not None:
             results['prediction_probability'] = np.round(proba_col, 4)
 
@@ -226,7 +339,7 @@ def predict():
         return render_template('results_alt.html', table_html=table_html, filename=filename, chart_image=chart_image)
 
     else:
-        flash('Allowed file types: csv')
+        set_popup_message('You have chosen the wrong file. Please select a valid file to proceed.')
         return redirect(url_for('index'))
 
 
