@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Login — Predictor</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='login.css') }}">
+  </head>
+  <body>
+    <main class="login-page">
+      <div class="login-card" role="main" aria-labelledby="login-heading">
+        <h1 id="login-heading">Sign in</h1>
+        {% if popup_message %}
+          <script>alert("{{ popup_message|e }}");</script>
+        {% endif %}
+
+        <form method="post" action="{{ url_for('login') }}" class="login-form" autocomplete="off">
+          <label for="username">Username</label>
+          <input id="username" name="username" type="text" placeholder="Enter username" required autofocus />
+
+          <label for="password">Password</label>
+          <input id="password" name="password" type="password" placeholder="Enter password" required />
+
+          <button type="submit" class="btn">Login</button>
+        </form>
+
+        <p class="note">Use your project credentials to continue.</p>
+      </div>
+    </main>
+  </body>
+  </html>
